@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apuração Presidente 2026</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --mute:#5f6b7a; --line:#dde2e8;
+          --lula:#d62828; --flavio:#1d4ed8; --empty:#c9ced6; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 system-ui, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px 20px 8px; }
+  h1 { margin:0; font-size:22px; }
+  .status { margin-top:6px; color:var(--mute); font-size:13px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; font-weight:600; margin-right:6px; }
+  .parcial { background:#fff3cd; color:#7a5b00; }
+  .final { background:#d1f2dc; color:#0f5a2a; }
+  .erro { background:#fde2e2; color:#8a1c1c; }
+  main { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr); gap:16px; padding:8px 20px 20px; }
+  @media (max-width:860px){ main { grid-template-columns:1fr; padding:8px 16px 16px; } header{padding:16px 16px 8px} }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .tabs button, .chips button { border:1px solid var(--line); background:#fff; border-radius:6px; padding:5px 10px; cursor:pointer; font:inherit; font-size:13px; }
+  .tabs button.on, .chips button.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  svg { width:100%; height:auto; display:block; }
+  svg path { stroke:#fff; stroke-width:.6; cursor:pointer; vector-effect:non-scaling-stroke; }
+  svg path:hover { stroke:#111; stroke-width:1.5; }
+  svg path.sel { stroke:#111; stroke-width:2.2; }
+  .rot text { font:700 10.5px system-ui, "Segoe UI", sans-serif; fill:#111; text-anchor:middle; pointer-events:none;
+              paint-order:stroke; stroke:#fff; stroke-width:3px; stroke-linejoin:round; }
+  .rot .sig { font-weight:600; fill:#333; }
+  .rot.reg text { font-size:19px; }
+  .live { color:#0f5a2a; font-weight:600; }
+  .live::before { content:"● "; color:#16a34a; }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--mute); margin-top:8px; }
+  .sw { display:inline-block; width:12px; height:12px; border-radius:3px; vertical-align:-2px; margin-right:4px; }
+  h2 { margin:0 0 4px; font-size:18px; }
+  .sub { color:var(--mute); font-size:13px; margin-bottom:10px; }
+  .cand { margin:10px 0; }
+  .cand .top { display:flex; justify-content:space-between; font-weight:600; }
+  .bar { height:10px; background:#eef0f3; border-radius:5px; overflow:hidden; margin-top:4px; }
+  .bar i { display:block; height:100%; }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin-top:10px; }
+  td { padding:5px 0; border-bottom:1px solid var(--line); }
+  td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+  .note { font-size:12px; color:var(--mute); margin-top:10px; }
+  footer { padding:0 20px 24px; font-size:12px; color:var(--mute); }
+  footer a { color:inherit; }
+  .warn { color:#8a1c1c; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Apuração — Presidente, 2º turno 2026</h1>
+  <div class="status" id="status">Carregando dados do TSE…</div>
+</header>
+<main>
+  <section class="card">
+    <div class="tabs" id="modes">
+      <button data-m="uf" class="on">Mapa por estado</button>
+      <button data-m="reg">Mapa por região</button>
+    </div>
+    <div class="chips" id="views"></div>
+    <div id="map"></div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--lula)"></i>Lula à frente</span>
+      <span><i class="sw" style="background:var(--flavio)"></i>Flávio à frente</span>
+      <span><i class="sw" style="background:var(--empty)"></i>Sem dados</span>
+      <span>Cor mais forte = margem maior</span>
+      <span>Números no mapa = % de seções totalizadas</span>
+    </div>
+  </section>
+  <section class="card" id="detail"></section>
+</main>
+<footer>
+  Fonte dos votos: arquivos JSON oficiais do TSE (padrão EA20) —
+  <a href="https://resultados.tse.jus.br/" target="_blank" rel="noopener">Portal de resultados do TSE</a> ·
+  <a href="https://www.tse.jus.br/eleicoes/informacoes-tecnicas-sobre-a-divulgacao-de-resultados" target="_blank" rel="noopener">Informações técnicas da divulgação</a> ·
+  <a href="https://www.tse.jus.br/eleicoes/eleicoes-2026-content/arquivos/divulgacao-de-resultados/tse-ea20-arquivo-de-resultado-unificado" target="_blank" rel="noopener">Especificação EA20</a>.<br>
+  Limites dos estados: <a href="https://servicodados.ibge.gov.br/api/docs/malhas?versao=3" target="_blank" rel="noopener">API de Malhas Territoriais do IBGE</a> (v3, qualidade mínima).
+  Regiões conforme a divisão regional do IBGE. Totais regionais = soma dos votos dos estados; votos do exterior entram só no total nacional.
+  Atualização ao vivo: consulta a cada 1 s, com ETag (o TSE só reenvia um arquivo quando ele muda).
+</footer>
+
+<script>
+// ---- Configuração: para outra eleição/turno, troque ELEICAO (código em ele-c.json) ----
+const ELEICAO = '6258', ANO = 'ele2026', CARGO = 'c0001';
+const REFRESH_MS = 1000; // consulta a cada 1 s (o TSE publica limite de 5000 req/s por cliente)
+const COR = { '13': '#d62828', '22': '#1d4ed8' }; // Lula vermelho, Flávio azul
+const COR_EXTRA = ['#7c3aed', '#0f766e'];
+
+const UFS = { '11':'ro','12':'ac','13':'am','14':'rr','15':'pa','16':'ap','17':'to',
+  '21':'ma','22':'pi','23':'ce','24':'rn','25':'pb','26':'pe','27':'al','28':'se','29':'ba',
+  '31':'mg','32':'es','33':'rj','35':'sp','41':'pr','42':'sc','43':'rs','50':'ms','51':'mt','52':'go','53':'df' };
+const NOMES = { ro:'Rondônia',ac:'Acre',am:'Amazonas',rr:'Roraima',pa:'Pará',ap:'Amapá',to:'Tocantins',
+  ma:'Maranhão',pi:'Piauí',ce:'Ceará',rn:'Rio Grande do Norte',pb:'Paraíba',pe:'Pernambuco',al:'Alagoas',se:'Sergipe',ba:'Bahia',
+  mg:'Minas Gerais',es:'Espírito Santo',rj:'Rio de Janeiro',sp:'São Paulo',pr:'Paraná',sc:'Santa Catarina',rs:'Rio Grande do Sul',
+  ms:'Mato Grosso do Sul',mt:'Mato Grosso',go:'Goiás',df:'Distrito Federal' };
+const REGIOES = { '1':'Norte','2':'Nordeste','3':'Sudeste','4':'Sul','5':'Centro-Oeste' };
+const regiaoDe = uf => Object.keys(UFS).find(k => UFS[k] === uf)[0];
+
+// Todos os arquivos (Brasil, exterior e 27 UFs) chegam numa única requisição ao /api/lote
+// (serve.ps1 localmente, Netlify Function em produção), que consulta o TSE com ETag.
+const ABRS = ['br', 'zz', ...Object.values(UFS)];
+const LOTE = `/api/lote?base=${ANO}/${ELEICAO}/dados&arq=${CARGO}-e${ELEICAO.padStart(6,'0')}-u&abr=${ABRS.join(',')}`;
+
+// ---- Conversão de números do TSE (texto, vírgula decimal) ----
+const int = s => { const n = parseInt(String(s ?? '').replace(/\D/g,''), 10); return Number.isFinite(n) ? n : null; };
+const fmt = n => n == null ? '—' : n.toLocaleString('pt-BR');
+const pct = (a, b) => (a == null || !b) ? null : a / b * 100;
+const fp = p => p == null ? '—' : p.toLocaleString('pt-BR', { minimumFractionDigits:2, maximumFractionDigits:2 }) + '%';
+
+// Normaliza um arquivo EA20 em um resumo numérico (null onde o campo faltar)
+function resumo(j) {
+  const carg = (j.carg || []).find(c => c.cd === '1') || (j.carg || [])[0];
+  const cands = [];
+  for (const a of carg?.agr || []) for (const p of a.par || []) for (const c of p.cand || [])
+    cands.push({ n: c.n, nome: c.nmu || c.nm, vap: int(c.vap), eleito: c.e === 's' });
+  const s = j.s || {}, e = j.e || {}, v = j.v || {};
+  return {
+    cands, vv: int(v.vv), vb: int(v.vb), vn: int(v.tvn ?? v.vn), tv: int(v.tv),
+    te: int(e.te), est: int(e.est), c: int(e.c), a: int(e.a), st: int(s.st), ts: int(s.ts),
+    data: j.dg && `${j.dg} ${j.hg || ''}`.trim(), tot: j.dt && `${j.dt} ${j.ht || ''}`.trim(),
+    final: j.tf === 's'
+  };
+}
+
+// Soma votos (nunca percentuais) de vários resumos
+function somar(lista) {
+  const ok = lista.filter(Boolean);
+  if (!ok.length) return null;
+  const add = k => ok.every(r => r[k] != null) ? ok.reduce((t, r) => t + r[k], 0) : null;
+  const porN = {};
+  for (const r of ok) for (const c of r.cands) {
+    porN[c.n] ??= { n: c.n, nome: c.nome, vap: 0 };
+    porN[c.n].vap = (c.vap == null || porN[c.n].vap == null) ? null : porN[c.n].vap + c.vap;
+  }
+  return { cands: Object.values(porN), vv: add('vv'), vb: add('vb'), vn: add('vn'), tv: add('tv'),
+    te: add('te'), est: add('est'), c: add('c'), a: add('a'), st: add('st'), ts: add('ts'),
+    final: ok.every(r => r.final), parcialArquivos: ok.length };
+}
+
+const dados = { br: null, zz: null, uf: {} }, falhas = new Set();
+let modo = 'uf', vista = { tipo: 'br' }, geo = null;
+
+let ultimoTexto = '', verificado = null, erroConexao = false, buscando = false;
+
+async function atualizar() {
+  if (buscando) return;          // nunca sobrepõe consultas
+  buscando = true;
+  try {
+    const r = await fetch(LOTE, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    const texto = await r.text();
+    verificado = new Date(); erroConexao = false;
+    if (texto === ultimoTexto) { status(); return; }   // nada mudou no TSE
+    ultimoTexto = texto;
+    const lote = JSON.parse(texto);
+    falhas.clear();
+    for (const abr of ABRS) {
+      if (!lote[abr]) { falhas.add(abr); continue; }   // arquivo indisponível: mantém o último válido
+      const s = resumo(lote[abr]);
+      if (abr === 'br') dados.br = s; else if (abr === 'zz') dados.zz = s; else dados.uf[abr] = s;
+    }
+  } catch { erroConexao = true; status(); return; }
+  finally { buscando = false; }
+  render();
+}
+
+function lider(r) {
+  if (!r || !r.cands.length || !r.vv) return null;
+  const ord = [...r.cands].sort((a, b) => (b.vap ?? -1) - (a.vap ?? -1));
+  if (ord[0].vap == null) return null;
+  return { c: ord[0], margem: ord[1] ? ((ord[0].vap - (ord[1].vap ?? 0)) / r.vv) : 1 };
+}
+function corCand(n, i = 0) { return COR[n] || COR_EXTRA[i % COR_EXTRA.length]; }
+function corDe(r) {
+  const l = lider(r);
+  if (!l || l.c.vap === 0) return 'var(--empty)';
+  const alpha = Math.min(1, 0.35 + l.margem * 2.5); // margem de 26 p.p. ou mais = cor cheia
+  return `color-mix(in srgb, ${corCand(l.c.n)} ${Math.round(alpha*100)}%, white)`;
+}
+function regiaoTotal(cod) {
+  return somar(Object.keys(UFS).filter(k => k[0] === cod).map(k => dados.uf[UFS[k]]));
+}
+
+// ---- Mapa (projeção equiretangular simples sobre a malha do IBGE) ----
+function desenharMapa() {
+  if (!geo) return;
+  const box = document.getElementById('map');
+  if (!box.firstChild) {
+    const k = Math.cos(15 * Math.PI / 180);
+    let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+    const each = (g, f) => (g.type === 'Polygon' ? [g.coordinates] : g.coordinates).forEach(p => p.forEach(f));
+    geo.features.forEach(ft => each(ft.geometry, ring => ring.forEach(([x, y]) => {
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); })));
+    const W = 600, s = W / ((maxX - minX) * k), H = (maxY - minY) * s;
+    const proj = ([x, y]) => [(x - minX) * k * s, (maxY - y) * s];
+    const svg = [`<svg viewBox="0 0 ${W} ${H.toFixed(0)}" role="img" aria-label="Mapa do Brasil por estado">`];
+    const centro = {}, regAcc = {};
+    for (const ft of geo.features) {
+      const uf = UFS[ft.properties.codarea];
+      let d = '', maior = { a: 0 }, area = 0;
+      each(ft.geometry, ring => {
+        const pts = ring.map(proj);
+        d += 'M' + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join('L') + 'Z';
+        // centroide do anel (fórmula do polígono); o rótulo vai no maior pedaço do estado
+        let a = 0, cx = 0, cy = 0;
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+          const f = pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+          a += f; cx += (pts[j][0] + pts[i][0]) * f; cy += (pts[j][1] + pts[i][1]) * f;
+        }
+        a /= 2; area += Math.abs(a);
+        if (Math.abs(a) > maior.a) maior = { a: Math.abs(a), x: cx / (6 * a), y: cy / (6 * a) };
+      });
+      centro[uf] = maior;
+      const cod = regiaoDe(uf), g = regAcc[cod] ??= { a: 0, x: 0, y: 0 };
+      g.a += area; g.x += maior.x * area; g.y += maior.y * area;
+      svg.push(`<path data-uf="${uf}" d="${d}"><title></title></path>`);
+    }
+    // Rótulos com o % de seções totalizadas (por estado ou por região, conforme o modo)
+    svg.push('<g class="rot" id="rot-uf">' + Object.entries(centro).map(([uf, c]) =>
+      `<text data-uf="${uf}" x="${c.x.toFixed(1)}" y="${c.y.toFixed(1)}"><tspan class="sig">${uf.toUpperCase()}</tspan><tspan class="v" x="${c.x.toFixed(1)}" dy="11"></tspan></text>`).join('') + '</g>');
+    svg.push('<g class="rot reg" id="rot-reg">' + Object.entries(regAcc).map(([cod, g]) => {
+      const x = (g.x / g.a).toFixed(1), y = (g.y / g.a).toFixed(1);
+      return `<text data-cod="${cod}" x="${x}" y="${y}"><tspan class="sig">${REGIOES[cod]}</tspan><tspan class="v" x="${x}" dy="20"></tspan></text>`; }).join('') + '</g>');
+    box.innerHTML = svg.join('') + '</svg>';
+    box.addEventListener('click', ev => {
+      const uf = ev.target.dataset?.uf;
+      if (!uf) return;
+      vista = modo === 'reg' ? { tipo: 'reg', cod: regiaoDe(uf) } : { tipo: 'uf', uf };
+      render();
+    });
+  }
+  box.querySelectorAll('path').forEach(p => {
+    const uf = p.dataset.uf, cod = regiaoDe(uf);
+    const r = modo === 'reg' ? regiaoTotal(cod) : dados.uf[uf];
+    p.style.fill = corDe(r);
+    const l = lider(r);
+    p.querySelector('title').textContent = `${NOMES[uf]} (${REGIOES[cod]})` + (l ? ` — ${l.c.nome} à frente` : ' — sem dados');
+    p.classList.toggle('sel', (vista.tipo === 'uf' && vista.uf === uf) || (vista.tipo === 'reg' && vista.cod === cod));
+  });
+  const secoes = r => r ? fp(pct(r.st, r.ts)) : '—';
+  box.querySelector('#rot-uf').style.display = modo === 'uf' ? '' : 'none';
+  box.querySelector('#rot-reg').style.display = modo === 'reg' ? '' : 'none';
+  box.querySelectorAll('#rot-uf text').forEach(t => t.querySelector('.v').textContent = secoes(dados.uf[t.dataset.uf]));
+  box.querySelectorAll('#rot-reg text').forEach(t => t.querySelector('.v').textContent = secoes(regiaoTotal(t.dataset.cod)));
+}
+
+function chips() {
+  const el = document.getElementById('views');
+  const b = (lab, v, on) => `<button data-v='${JSON.stringify(v)}' class="${on ? 'on' : ''}">${lab}</button>`;
+  el.innerHTML = b('Brasil', { tipo: 'br' }, vista.tipo === 'br') +
+    Object.entries(REGIOES).map(([c, n]) => b(n, { tipo: 'reg', cod: c }, vista.tipo === 'reg' && vista.cod === c)).join('') +
+    b('Exterior', { tipo: 'zz' }, vista.tipo === 'zz');
+}
+
+function detalhe() {
+  let r, titulo, nota = '';
+  if (vista.tipo === 'br') { r = dados.br; titulo = 'Brasil (total nacional)';
+    nota = 'Total nacional oficial do TSE, incluindo votos do exterior.'; }
+  else if (vista.tipo === 'zz') { r = dados.zz; titulo = 'Exterior';
+    nota = 'Votos do exterior entram apenas no total nacional, não em uma região.'; }
+  else if (vista.tipo === 'reg') {
+    const ufs = Object.keys(UFS).filter(k => k[0] === vista.cod).map(k => UFS[k]);
+    r = regiaoTotal(vista.cod); titulo = `Região ${REGIOES[vista.cod]}`;
+    const falt = ufs.filter(u => !dados.uf[u]);
+    nota = `Soma dos votos de ${ufs.map(u => u.toUpperCase()).join(', ')}; percentuais = votos do candidato ÷ votos válidos somados.`;
+    if (falt.length) { r = null; nota += ` <span class="warn">Arquivo indisponível: ${falt.join(', ').toUpperCase()} — total regional não calculado.</span>`; }
+  } else { r = dados.uf[vista.uf]; titulo = `${NOMES[vista.uf]} (${vista.uf.toUpperCase()})`; }
+
+  const el = document.getElementById('detail');
+  if (!r) { el.innerHTML = `<h2>${titulo}</h2><p class="warn">Dados indisponíveis no momento.</p><p class="note">${nota}</p>`; return; }
+  const ord = [...r.cands].sort((a, b) => (b.vap ?? -1) - (a.vap ?? -1));
+  const sec = pct(r.st, r.ts);
+  el.innerHTML = `<h2>${titulo}</h2>
+    <div class="sub">${r.final ? '<span class="badge final">Totalização final</span>' : '<span class="badge parcial">Parcial</span>'}
+      ${fp(sec)} das seções totalizadas${r.tot ? ` · totalização ${r.tot}` : ''}</div>
+    ${ord.map((c, i) => { const p = pct(c.vap, r.vv); return `<div class="cand">
+      <div class="top"><span>${c.nome} (${c.n})${c.eleito ? ' — eleito' : ''}</span><span>${fp(p)}</span></div>
+      <div class="bar"><i style="width:${p ?? 0}%;background:${corCand(c.n, i)}"></i></div>
+      <div class="sub" style="margin:2px 0 0">${fmt(c.vap)} votos</div></div>`; }).join('')}
+    <table>
+      <tr><td>Votos válidos</td><td>${fmt(r.vv)}</td></tr>
+      <tr><td>Brancos</td><td>${fmt(r.vb)} (${fp(pct(r.vb, r.tv))})</td></tr>
+      <tr><td>Nulos</td><td>${fmt(r.vn)} (${fp(pct(r.vn, r.tv))})</td></tr>
+      <tr><td>Eleitorado</td><td>${fmt(r.te)}</td></tr>
+      <tr><td>Comparecimento</td><td>${fmt(r.c)} (${fp(pct(r.c, r.est))})</td></tr>
+      <tr><td>Abstenção</td><td>${fmt(r.a)} (${fp(pct(r.a, r.est))})</td></tr>
+      <tr><td>Seções totalizadas</td><td>${fmt(r.st)} de ${fmt(r.ts)}</td></tr>
+    </table>
+    <p class="note">${nota} Brancos e nulos em % do total de votos; comparecimento e abstenção em % do eleitorado das seções já totalizadas.</p>`;
+}
+
+function status() {
+  const br = dados.br, el = document.getElementById('status');
+  if (!br) { el.innerHTML = '<span class="badge erro">Sem dados</span>Arquivo nacional do TSE indisponível.'; return; }
+  el.innerHTML = (br.final ? '<span class="badge final">Totalização final</span>' : '<span class="badge parcial">Apuração parcial</span>') +
+    `Arquivo do TSE gerado em ${br.data || '—'} (horário de Brasília) · ${fp(pct(br.st, br.ts))} das seções totalizadas` +
+    (falhas.size ? ` · <span class="warn">indisponíveis: ${[...falhas].join(', ').toUpperCase()}</span>` : '') +
+    (erroConexao ? ' · <span class="warn">sem conexão com o servidor; mostrando os últimos dados recebidos</span>'
+      : verificado ? ` · <span class="live">Ao vivo</span> verificado às ${verificado.toLocaleTimeString('pt-BR')}` : '');
+}
+
+function render() { status(); chips(); desenharMapa(); detalhe(); }
+
+document.getElementById('modes').addEventListener('click', ev => {
+  const m = ev.target.dataset.m; if (!m) return;
+  modo = m;
+  document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+  if (modo === 'reg' && vista.tipo === 'uf') vista = { tipo: 'reg', cod: regiaoDe(vista.uf) };
+  render();
+});
+document.getElementById('views').addEventListener('click', ev => {
+  if (!ev.target.dataset.v) return;
+  vista = JSON.parse(ev.target.dataset.v); render();
+});
+
+(async () => {
+  try { geo = await (await fetch('malha-uf-ibge.json')).json(); }
+  catch { document.getElementById('map').innerHTML = '<p class="warn">Malha do IBGE indisponível.</p>'; }
+  await atualizar();
+  setInterval(() => { if (!document.hidden) atualizar(); }, REFRESH_MS);
+})();
+</script>
+</body>
+</html>
