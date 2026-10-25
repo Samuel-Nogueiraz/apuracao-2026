@@ -471,7 +471,7 @@ async function prepararBusca() {
 function mostrarResultados() {
   const q = semAcento(busca.value.trim());
   resultados = !q || !indiceBusca ? [] : [
-    ...indiceBusca.filter(m => m.chave.startsWith(q)),
+    ...indiceBusca.filter(m => m.chave.startsWith(q)).sort((a, b) => a.chave.length - b.chave.length),
     ...indiceBusca.filter(m => !m.chave.startsWith(q) && m.chave.includes(q)),
   ].slice(0, 12);
   ativo = resultados.length ? 0 : -1;
