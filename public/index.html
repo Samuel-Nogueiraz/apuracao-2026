@@ -45,6 +45,13 @@
     h1 { font-size:19px; }
     #detail { order:-1; }
   }
+  .busca { position:relative; margin-top:10px; max-width:420px; }
+  .busca input { width:100%; font:inherit; font-size:16px; padding:9px 12px; min-height:44px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .busca input:focus-visible { outline:3px solid #2563eb; outline-offset:1px; }
+  .busca ul { position:absolute; z-index:10; left:0; right:0; top:100%; margin:4px 0 0; padding:4px; list-style:none; background:#fff; border:1px solid var(--line); border-radius:8px; box-shadow:0 8px 24px rgba(16,24,40,.12); max-height:320px; overflow:auto; }
+  .busca li { padding:10px; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; gap:8px; }
+  .busca li[aria-selected="true"], .busca li:hover { background:#eef0f3; }
+  .busca li small { color:var(--mute); }
   .live { color:#0f5a2a; font-weight:600; }
   .live::before { content:"● "; color:#16a34a; }
   .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--mute); margin-top:8px; }
@@ -68,6 +75,11 @@
 <header>
   <h1>Apuração — Presidente, 2º turno 2026</h1>
   <div class="status" id="status">Carregando dados do TSE…</div>
+  <div class="busca">
+    <input id="busca" type="search" placeholder="Pesquisar município…" autocomplete="off" aria-label="Pesquisar município"
+           role="combobox" aria-expanded="false" aria-controls="buscaRes">
+    <ul id="buscaRes" role="listbox" hidden></ul>
+  </div>
 </header>
 <main>
   <section class="card">
@@ -209,7 +221,7 @@ function regiaoTotal(cod) {
 let munUf = null, munLista = null;
 const munGeo = {}, munDados = {}, munFalhas = new Set();
 let munBuscando = false, munTexto = '';
-const MUN_REFRESH_MS = 15000; // centenas de arquivos por UF: consulta a cada 15 s
+const MUN_REFRESH_MS = 30000; // centenas de arquivos por UF: consulta a cada 30 s
 
 async function carregarMunicipios(uf) {
   munLista ??= await (await fetch('municipios-tse.json')).json();
@@ -376,12 +388,12 @@ function detalhe() {
   } else if (vista.tipo === 'mun') {
     const m = (munLista?.[vista.uf] || []).find(x => x[0] === vista.cd);
     r = munDados[vista.uf + vista.cd]; titulo = `${m ? m[2] : 'Município'} (${vista.uf.toUpperCase()})`;
-    nota = 'Resultado municipal do arquivo EA20 do TSE (atualizado a cada 15 s).';
+    nota = 'Resultado municipal do arquivo EA20 do TSE (atualizado a cada 30 s).';
   } else { r = dados.uf[vista.uf]; titulo = `${NOMES[vista.uf]} (${vista.uf.toUpperCase()})`;
     if (modo !== 'mun') nota = `<button class="btn" data-abrir-mun="${vista.uf}">Ver municípios de ${NOMES[vista.uf]} →</button>`; }
 
   const el = document.getElementById('detail');
-  if (!r) { el.innerHTML = `<h2>${titulo}</h2><p class="warn">Dados indisponíveis no momento.</p><p class="note">${nota}</p>`; return; }
+  if (!r) { el.innerHTML = `<h2>${titulo}</h2><p class="warn">${vista.tipo === 'mun' ? 'Aguardando resposta do TSE para este município; nova tentativa automática em até 30 s.' : 'Dados indisponíveis no momento.'}</p><p class="note">${nota}</p>`; return; }
   const ord = [...r.cands].sort((a, b) => (b.vap ?? -1) - (a.vap ?? -1));
   const sec = pct(r.st, r.ts);
   el.innerHTML = `<h2>${titulo}</h2>
@@ -445,6 +457,50 @@ document.getElementById('views').addEventListener('click', ev => {
   if (!ev.target.dataset.v) return;
   vista = JSON.parse(ev.target.dataset.v); render();
 });
+
+// ---- Busca de município (todo o Brasil, sem diferenciar acentos) ----
+const semAcento = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+let indiceBusca = null, resultados = [], ativo = -1;
+const busca = document.getElementById('busca'), buscaRes = document.getElementById('buscaRes');
+
+async function prepararBusca() {
+  if (indiceBusca) return;
+  munLista ??= await (await fetch('municipios-tse.json')).json();
+  indiceBusca = Object.entries(munLista).flatMap(([uf, l]) => l.map(([cd, , nm]) => ({ uf, cd, nm, chave: semAcento(nm) })));
+}
+function mostrarResultados() {
+  const q = semAcento(busca.value.trim());
+  resultados = !q || !indiceBusca ? [] : [
+    ...indiceBusca.filter(m => m.chave.startsWith(q)),
+    ...indiceBusca.filter(m => !m.chave.startsWith(q) && m.chave.includes(q)),
+  ].slice(0, 12);
+  ativo = resultados.length ? 0 : -1;
+  buscaRes.innerHTML = q && !resultados.length ? '<li aria-disabled="true">Nenhum município encontrado</li>'
+    : resultados.map((m, i) => `<li role="option" data-i="${i}" aria-selected="${i === ativo}">${m.nm}<small>${NOMES[m.uf]}</small></li>`).join('');
+  buscaRes.hidden = !q;
+  busca.setAttribute('aria-expanded', String(!buscaRes.hidden));
+}
+async function escolher(m) {
+  if (!m) return;
+  busca.value = ''; buscaRes.hidden = true; busca.setAttribute('aria-expanded', 'false'); busca.blur();
+  vista = { tipo: 'mun', uf: m.uf, cd: m.cd };
+  await abrirMunicipios(m.uf);
+  document.getElementById('detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+busca.addEventListener('focus', prepararBusca);
+busca.addEventListener('input', async () => { await prepararBusca(); mostrarResultados(); });
+busca.addEventListener('keydown', ev => {
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    if (!resultados.length) return;
+    ev.preventDefault();
+    ativo = (ativo + (ev.key === 'ArrowDown' ? 1 : -1) + resultados.length) % resultados.length;
+    buscaRes.querySelectorAll('li').forEach((li, i) => li.setAttribute('aria-selected', String(i === ativo)));
+    buscaRes.children[ativo]?.scrollIntoView({ block: 'nearest' });
+  } else if (ev.key === 'Enter') { ev.preventDefault(); escolher(resultados[ativo]); }
+  else if (ev.key === 'Escape') { buscaRes.hidden = true; busca.setAttribute('aria-expanded', 'false'); }
+});
+buscaRes.addEventListener('mousedown', ev => { const li = ev.target.closest('li[data-i]'); if (li) { ev.preventDefault(); escolher(resultados[+li.dataset.i]); } });
+busca.addEventListener('blur', () => setTimeout(() => { buscaRes.hidden = true; busca.setAttribute('aria-expanded', 'false'); }, 100));
 
 (async () => {
   try { geo = await (await fetch('malha-uf-ibge.json')).json(); }

@@ -7,7 +7,7 @@ param([int]$Port = 8026)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-[Net.ServicePointManager]::DefaultConnectionLimit = 64   # padrão do .NET é 2 por host; municípios pedem centenas de arquivos
+[Net.ServicePointManager]::DefaultConnectionLimit = 16   # padrão do .NET é 2 por host; municípios pedem centenas de arquivos
 Add-Type -AssemblyName System.Net.Http
 $root = $PSScriptRoot
 $TSE = 'https://resultados.tse.jus.br/oficial/'
@@ -20,7 +20,10 @@ $http = New-Object Net.Http.HttpClient
 $http.Timeout = [TimeSpan]::FromSeconds(25)
 $http.DefaultRequestHeaders.UserAgent.ParseAdd('apuracao-2026-local')
 
+$script:pausaAte = [datetime]::MinValue   # após um 429 do TSE, não consulta até esse horário
+
 function Update-Arquivos([string[]]$urls) {
+  if ((Get-Date) -lt $script:pausaAte) { return }   # respeita o limite do TSE; usa as cópias locais
   $tasks = foreach ($u in $urls) {
     $req = New-Object Net.Http.HttpRequestMessage ([Net.Http.HttpMethod]::Get), $u
     if ($cache[$u] -and $cache[$u].etag) { [void]$req.Headers.TryAddWithoutValidation('If-None-Match', $cache[$u].etag) }
@@ -34,6 +37,9 @@ function Update-Arquivos([string[]]$urls) {
     if ($r.IsSuccessStatusCode) {
       $etag = $null; if ($r.Headers.ETag) { $etag = $r.Headers.ETag.Tag }
       $cache[$urls[$i]] = @{ etag = $etag; body = $r.Content.ReadAsByteArrayAsync().Result }
+    } elseif ([int]$r.StatusCode -eq 429) {
+      $espera = 30; if ($r.Headers.RetryAfter -and $r.Headers.RetryAfter.Delta) { $espera = [Math]::Max(5, $r.Headers.RetryAfter.Delta.TotalSeconds) }
+      $script:pausaAte = (Get-Date).AddSeconds($espera)
     } elseif ([int]$r.StatusCode -eq 404) {
       $cache.Remove($urls[$i])                               # arquivo não publicado
     }

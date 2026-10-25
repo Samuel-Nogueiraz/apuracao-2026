@@ -5,8 +5,11 @@
 const TSE = 'https://resultados.tse.jus.br/oficial/';
 const cache = new Map(); // url -> { etag, body } enquanto a instância da função estiver ativa
 
+let pausaAte = 0; // após um 429 do TSE, não consulta até esse instante (ms)
+
 async function buscar(url) {
   const c = cache.get(url);
+  if (Date.now() < pausaAte) return c?.body ?? null;
   try {
     const r = await fetch(url, {
       headers: c?.etag ? { 'If-None-Match': c.etag } : {},
@@ -19,6 +22,7 @@ async function buscar(url) {
       cache.set(url, { etag: r.headers.get('etag'), body });
       return body;
     }
+    if (r.status === 429) pausaAte = Date.now() + Math.max(5, Number(r.headers.get('retry-after')) || 30) * 1000;
     if (r.status === 404) { cache.delete(url); return null; } // arquivo não publicado
   } catch {}
   return c?.body ?? null; // falha temporária: mantém a última versão válida
@@ -31,10 +35,10 @@ export default async (req) => {
       abrs.length > 1000 || abrs.some(a => !/^[a-z]{2}(\d{5})?$/.test(a))) {
     return new Response('parâmetros inválidos', { status: 400 });
   }
-  // UF ("sp") ou município ("sp71072", pasta da UF); em blocos de 80 para não abrir conexões demais
+  // UF ("sp") ou município ("sp71072", pasta da UF); em blocos de 25 para não abrir conexões demais
   const corpos = [];
-  for (let i = 0; i < abrs.length; i += 80) {
-    corpos.push(...await Promise.all(abrs.slice(i, i + 80).map(a => buscar(`${TSE}${base}/${a.slice(0, 2)}/${a}-${arq}.json`))));
+  for (let i = 0; i < abrs.length; i += 25) {
+    corpos.push(...await Promise.all(abrs.slice(i, i + 25).map(a => buscar(`${TSE}${base}/${a.slice(0, 2)}/${a}-${arq}.json`))));
   }
   const json = '{' + abrs.map((a, i) => `"${a}":${corpos[i] ?? 'null'}`).join(',') + '}';
   return new Response(json, {
