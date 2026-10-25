@@ -52,6 +52,10 @@
   .busca li { padding:10px; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; gap:8px; }
   .busca li[aria-selected="true"], .busca li:hover { background:#eef0f3; }
   .busca li small { color:var(--mute); }
+  .selo { margin:10px 0 4px; padding:10px 12px; border-radius:8px; font-size:14px; line-height:1.4;
+          background:color-mix(in srgb, var(--c) 10%, white); border:1px solid color-mix(in srgb, var(--c) 35%, white);
+          border-left:4px solid var(--c); color:#1b1f24; }
+  .selo strong { font-variant-numeric:tabular-nums; }
   .live { color:#0f5a2a; font-weight:600; }
   .live::before { content:"● "; color:#16a34a; }
   .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--mute); margin-top:8px; }
@@ -396,9 +400,19 @@ function detalhe() {
   if (!r) { el.innerHTML = `<h2>${titulo}</h2><p class="warn">${vista.tipo === 'mun' ? 'Aguardando resposta do TSE para este município; nova tentativa automática em até 30 s.' : 'Dados indisponíveis no momento.'}</p><p class="note">${nota}</p>`; return; }
   const ord = [...r.cands].sort((a, b) => (b.vap ?? -1) - (a.vap ?? -1));
   const sec = pct(r.st, r.ts);
+  // Selo com a diferença entre o 1º e o 2º colocados (votos e pontos percentuais dos válidos)
+  let selo = '';
+  if (ord.length > 1 && ord[0].vap != null && ord[1].vap != null) {
+    const dif = ord[0].vap - ord[1].vap, pp = pct(dif, r.vv);
+    const ppTxt = pp == null ? '' : ` (${pp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} p.p.)`;
+    selo = dif === 0
+      ? `<div class="selo" style="--c:#6b7280">Empate: ${fmt(ord[0].vap)} votos cada</div>`
+      : `<div class="selo" style="--c:${corCand(ord[0].n)}"><strong>${ord[0].nome}</strong> à frente por <strong>${fmt(dif)} votos</strong>${ppTxt} sobre ${ord[1].nome}</div>`;
+  }
   el.innerHTML = `<h2>${titulo}</h2>
     <div class="sub">${r.final ? '<span class="badge final">Totalização final</span>' : '<span class="badge parcial">Parcial</span>'}
       ${fp(sec)} das seções totalizadas${r.tot ? ` · totalização ${r.tot}` : ''}</div>
+    ${selo}
     ${ord.map((c, i) => { const p = pct(c.vap, r.vv); return `<div class="cand">
       <div class="top"><span>${c.nome} (${c.n})${c.eleito ? ' — eleito' : ''}</span><span>${fp(p)}</span></div>
       <div class="bar"><i style="width:${p ?? 0}%;background:${corCand(c.n, i)}"></i></div>
