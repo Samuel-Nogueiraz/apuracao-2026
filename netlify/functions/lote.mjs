@@ -28,10 +28,14 @@ export default async (req) => {
   const q = new URL(req.url).searchParams;
   const base = q.get('base') || '', arq = q.get('arq') || '', abrs = (q.get('abr') || '').split(',');
   if (!/^[a-z0-9]+\/\d+\/dados$/.test(base) || !/^[a-z0-9-]+$/.test(arq) ||
-      abrs.length > 40 || abrs.some(a => !/^[a-z]{2}$/.test(a))) {
+      abrs.length > 1000 || abrs.some(a => !/^[a-z]{2}(\d{5})?$/.test(a))) {
     return new Response('parâmetros inválidos', { status: 400 });
   }
-  const corpos = await Promise.all(abrs.map(a => buscar(`${TSE}${base}/${a}/${a}-${arq}.json`)));
+  // UF ("sp") ou município ("sp71072", pasta da UF); em blocos de 80 para não abrir conexões demais
+  const corpos = [];
+  for (let i = 0; i < abrs.length; i += 80) {
+    corpos.push(...await Promise.all(abrs.slice(i, i + 80).map(a => buscar(`${TSE}${base}/${a.slice(0, 2)}/${a}-${arq}.json`))));
+  }
   const json = '{' + abrs.map((a, i) => `"${a}":${corpos[i] ?? 'null'}`).join(',') + '}';
   return new Response(json, {
     headers: {

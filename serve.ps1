@@ -7,6 +7,7 @@ param([int]$Port = 8026)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+[Net.ServicePointManager]::DefaultConnectionLimit = 64   # padrão do .NET é 2 por host; municípios pedem centenas de arquivos
 Add-Type -AssemblyName System.Net.Http
 $root = $PSScriptRoot
 $TSE = 'https://resultados.tse.jus.br/oficial/'
@@ -16,7 +17,7 @@ $cache = @{}         # url -> @{ etag; body } (última versão válida)
 $lote = @{ chave = ''; t = [datetime]::MinValue; body = $null }
 
 $http = New-Object Net.Http.HttpClient
-$http.Timeout = [TimeSpan]::FromSeconds(8)
+$http.Timeout = [TimeSpan]::FromSeconds(25)
 $http.DefaultRequestHeaders.UserAgent.ParseAdd('apuracao-2026-local')
 
 function Update-Arquivos([string[]]$urls) {
@@ -44,7 +45,7 @@ function Update-Arquivos([string[]]$urls) {
 function Get-Lote([string]$base, [string]$arq, [string[]]$abrs) {
   $chave = "$base|$arq|$($abrs -join ',')"
   if ($lote.chave -eq $chave -and ((Get-Date) - $lote.t).TotalSeconds -lt $INTERVALO_MIN) { return $lote.body }
-  $urls = $abrs | ForEach-Object { "$TSE$base/$_/$_-$arq.json" }
+  $urls = $abrs | ForEach-Object { "$TSE$base/$($_.Substring(0,2))/$_-$arq.json" }
   Update-Arquivos $urls
   $ms = New-Object IO.MemoryStream
   $w = { param($s) $b = [Text.Encoding]::UTF8.GetBytes($s); $ms.Write($b, 0, $b.Length) }
@@ -80,8 +81,10 @@ while ($listener.IsListening) {
     $type = 'application/json; charset=utf-8'
     if ($path -eq '/api/lote') {
       $base = $req.QueryString['base']; $arq = $req.QueryString['arq']; $abrs = $req.QueryString['abr'] -split ','
-      if ($base -notmatch '^[a-z0-9]+/\d+/dados$' -or $arq -notmatch '^[a-z0-9\-]+$' -or ($abrs | Where-Object { $_ -notmatch '^[a-z]{2}$' })) { throw 'parâmetros inválidos' }
+      if ($base -notmatch '^[a-z0-9]+/\d+/dados$' -or $arq -notmatch '^[a-z0-9\-]+$' -or ($abrs.Count -gt 1000) -or ($abrs | Where-Object { $_ -notmatch '^[a-z]{2}(\d{5})?$' })) { throw 'parâmetros inválidos' }
       $r = @{ code = 200; body = (Get-Lote $base $arq $abrs) }
+    } elseif ($path -eq '/municipios-tse.json') {
+      $r = @{ code = 200; body = [IO.File]::ReadAllBytes((Join-Path $root 'public\municipios-tse.json')) }
     } elseif ($path -eq '/malha-uf-ibge.json') {
       $file = Join-Path $root 'public\malha-uf-ibge.json'
       if (-not (Test-Path $file)) {

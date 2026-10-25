@@ -31,6 +31,20 @@
               paint-order:stroke; stroke:#fff; stroke-width:3px; stroke-linejoin:round; }
   .rot .sig { font-weight:600; fill:#333; }
   .rot.reg text { font-size:19px; }
+  #map svg.mun path { stroke-width:.35; }
+  .munbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .munbar select { font:inherit; font-size:14px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:#fff; min-height:40px; flex:1 1 160px; min-width:0; }
+  .btn { display:inline-flex; align-items:center; gap:6px; margin-top:12px; border:1px solid var(--ink); background:var(--ink); color:#fff; border-radius:8px; padding:8px 14px; font:inherit; font-size:14px; font-weight:600; cursor:pointer; min-height:40px; }
+  button:focus-visible, select:focus-visible { outline:3px solid #2563eb; outline-offset:2px; }
+  .tabs button, .chips button { min-height:36px; transition:background-color .15s, color .15s; }
+  .tabs button:hover:not(.on), .chips button:hover:not(.on) { background:#eef0f3; }
+  .card { box-shadow:0 1px 2px rgba(16,24,40,.04); }
+  .cand .top span:last-child, td:last-child { font-variant-numeric:tabular-nums; }
+  @media (max-width:860px) {
+    .tabs button, .chips button { min-height:44px; padding:8px 12px; }
+    h1 { font-size:19px; }
+    #detail { order:-1; }
+  }
   .live { color:#0f5a2a; font-weight:600; }
   .live::before { content:"● "; color:#16a34a; }
   .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--mute); margin-top:8px; }
@@ -60,8 +74,13 @@
     <div class="tabs" id="modes">
       <button data-m="uf" class="on">Mapa por estado</button>
       <button data-m="reg">Mapa por região</button>
+      <button data-m="mun">Por município</button>
     </div>
     <div class="chips" id="views"></div>
+    <div class="munbar" id="munbar" hidden>
+      <select id="selUf" aria-label="Estado"></select>
+      <select id="selMun" aria-label="Município"></select>
+    </div>
     <div id="map"></div>
     <div class="legend">
       <span><i class="sw" style="background:var(--lula)"></i>Lula à frente</span>
@@ -186,10 +205,102 @@ function regiaoTotal(cod) {
 }
 
 // ---- Mapa (projeção equiretangular simples sobre a malha do IBGE) ----
+// ---- Municípios: lista TSE↔IBGE (gerada de config/mun-e006258-cm.json), malha IBGE por UF e lote do TSE ----
+let munUf = null, munLista = null;
+const munGeo = {}, munDados = {}, munFalhas = new Set();
+let munBuscando = false, munTexto = '';
+const MUN_REFRESH_MS = 15000; // centenas de arquivos por UF: consulta a cada 15 s
+
+async function carregarMunicipios(uf) {
+  munLista ??= await (await fetch('municipios-tse.json')).json();
+  munGeo[uf] ??= await (await fetch(`https://servicodados.ibge.gov.br/api/v3/malhas/estados/${uf.toUpperCase()}?formato=application/vnd.geo%2Bjson&qualidade=minima&intrarregiao=municipio`)).json();
+}
+async function atualizarMunicipios() {
+  if (modo !== 'mun' || !munUf || !munLista || munBuscando) return;
+  munBuscando = true;
+  const uf = munUf, lista = munLista[uf] || [];
+  try {
+    const abrs = lista.map(m => uf + m[0]);
+    const r = await fetch(`/api/lote?base=${ANO}/${ELEICAO}/dados&arq=${CARGO}-e${ELEICAO.padStart(6,'0')}-u&abr=${abrs.join(',')}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    const texto = await r.text();
+    if (texto !== munTexto && uf === munUf) {
+      munTexto = texto;
+      const lote = JSON.parse(texto);
+      munFalhas.clear();
+      for (const m of lista) { const j = lote[uf + m[0]]; if (j) munDados[uf + m[0]] = resumo(j); else munFalhas.add(m[0]); }
+      render();
+    }
+  } catch { /* mantém os últimos dados municipais */ }
+  finally { munBuscando = false; }
+}
+async function abrirMunicipios(uf) {
+  modo = 'mun'; munUf = uf; munTexto = '';
+  if (vista.tipo !== 'mun' || vista.uf !== uf) vista = { tipo: 'uf', uf };
+  document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.m === 'mun'));
+  const box = document.getElementById('map');
+  box.dataset.kind = ''; box.innerHTML = '<p class="sub">Carregando municípios…</p>';
+  try { await carregarMunicipios(uf); } catch { box.innerHTML = '<p class="warn">Malha municipal do IBGE indisponível.</p>'; return; }
+  render();
+  atualizarMunicipios();
+}
+function munPorCdi(uf) {
+  const m = {}; for (const [cd, cdi, nm] of munLista?.[uf] || []) m[cdi] = { cd, nm }; return m;
+}
+
+function projetar(features) {
+  const k = Math.cos(15 * Math.PI / 180);
+  let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+  const each = (g, f) => (g.type === 'Polygon' ? [g.coordinates] : g.coordinates).forEach(p => p.forEach(f));
+  features.forEach(ft => each(ft.geometry, ring => ring.forEach(([x, y]) => {
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); })));
+  const W = 600, s = W / ((maxX - minX) * k), H = (maxY - minY) * s;
+  const d = g => { let out = ''; each(g, ring => { out += 'M' + ring.map(([x, y]) => `${((x - minX) * k * s).toFixed(1)},${((maxY - y) * s).toFixed(1)}`).join('L') + 'Z'; }); return out; };
+  return { W, H, d };
+}
+
+function desenharMunicipios() {
+  const box = document.getElementById('map'), uf = munUf, gj = munGeo[uf];
+  if (!gj) return;
+  const mapa = munPorCdi(uf);
+  if (box.dataset.kind !== 'mun-' + uf) {
+    const { W, H, d } = projetar(gj.features);
+    box.innerHTML = `<svg class="mun" viewBox="0 0 ${W} ${H.toFixed(0)}" role="img" aria-label="Mapa de ${NOMES[uf]} por município">` +
+      gj.features.map(ft => { const m = mapa[ft.properties.codarea];
+        return `<path data-mun="${m ? m.cd : ''}" d="${d(ft.geometry)}"><title></title></path>`; }).join('') + '</svg>';
+    box.dataset.kind = 'mun-' + uf;
+  }
+  const nomes = {}; for (const [cd, , nm] of munLista[uf]) nomes[cd] = nm;
+  box.querySelectorAll('path').forEach(p => {
+    const cd = p.dataset.mun, r = munDados[uf + cd], l = lider(r);
+    p.style.fill = corDe(r);
+    p.querySelector('title').textContent = `${nomes[cd] || 'Município'}` + (l ? ` — ${l.c.nome} à frente · ${fp(pct(r.st, r.ts))} apurado` : ' — sem dados');
+    p.classList.toggle('sel', vista.tipo === 'mun' && vista.cd === cd);
+  });
+}
+
+function barraMunicipios() {
+  const bar = document.getElementById('munbar');
+  bar.hidden = modo !== 'mun';
+  if (bar.hidden || !munLista) return;
+  const selUf = document.getElementById('selUf'), selMun = document.getElementById('selMun');
+  if (!selUf.options.length) selUf.innerHTML = Object.values(UFS).sort((a, b) => NOMES[a].localeCompare(NOMES[b]))
+    .map(u => `<option value="${u}">${NOMES[u]}</option>`).join('');
+  selUf.value = munUf;
+  if (selMun.dataset.uf !== munUf) {
+    selMun.innerHTML = '<option value="">Todo o estado</option>' + [...munLista[munUf]].sort((a, b) => a[2].localeCompare(b[2]))
+      .map(([cd, , nm]) => `<option value="${cd}">${nm}</option>`).join('');
+    selMun.dataset.uf = munUf;
+  }
+  selMun.value = vista.tipo === 'mun' ? vista.cd : '';
+}
+
 function desenharMapa() {
+  if (modo === 'mun') return desenharMunicipios();
   if (!geo) return;
   const box = document.getElementById('map');
-  if (!box.firstChild) {
+  if (box.dataset.kind !== 'uf') {
+    box.dataset.kind = 'uf';
     const k = Math.cos(15 * Math.PI / 180);
     let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
     const each = (g, f) => (g.type === 'Polygon' ? [g.coordinates] : g.coordinates).forEach(p => p.forEach(f));
@@ -226,12 +337,6 @@ function desenharMapa() {
       const x = (g.x / g.a).toFixed(1), y = (g.y / g.a).toFixed(1);
       return `<text data-cod="${cod}" x="${x}" y="${y}"><tspan class="sig">${REGIOES[cod]}</tspan><tspan class="v" x="${x}" dy="20"></tspan></text>`; }).join('') + '</g>');
     box.innerHTML = svg.join('') + '</svg>';
-    box.addEventListener('click', ev => {
-      const uf = ev.target.dataset?.uf;
-      if (!uf) return;
-      vista = modo === 'reg' ? { tipo: 'reg', cod: regiaoDe(uf) } : { tipo: 'uf', uf };
-      render();
-    });
   }
   box.querySelectorAll('path').forEach(p => {
     const uf = p.dataset.uf, cod = regiaoDe(uf);
@@ -268,7 +373,12 @@ function detalhe() {
     const falt = ufs.filter(u => !dados.uf[u]);
     nota = `Soma dos votos de ${ufs.map(u => u.toUpperCase()).join(', ')}; percentuais = votos do candidato ÷ votos válidos somados.`;
     if (falt.length) { r = null; nota += ` <span class="warn">Arquivo indisponível: ${falt.join(', ').toUpperCase()} — total regional não calculado.</span>`; }
-  } else { r = dados.uf[vista.uf]; titulo = `${NOMES[vista.uf]} (${vista.uf.toUpperCase()})`; }
+  } else if (vista.tipo === 'mun') {
+    const m = (munLista?.[vista.uf] || []).find(x => x[0] === vista.cd);
+    r = munDados[vista.uf + vista.cd]; titulo = `${m ? m[2] : 'Município'} (${vista.uf.toUpperCase()})`;
+    nota = 'Resultado municipal do arquivo EA20 do TSE (atualizado a cada 15 s).';
+  } else { r = dados.uf[vista.uf]; titulo = `${NOMES[vista.uf]} (${vista.uf.toUpperCase()})`;
+    if (modo !== 'mun') nota = `<button class="btn" data-abrir-mun="${vista.uf}">Ver municípios de ${NOMES[vista.uf]} →</button>`; }
 
   const el = document.getElementById('detail');
   if (!r) { el.innerHTML = `<h2>${titulo}</h2><p class="warn">Dados indisponíveis no momento.</p><p class="note">${nota}</p>`; return; }
@@ -303,10 +413,29 @@ function status() {
       : verificado ? ` · <span class="live">Ao vivo</span> verificado às ${verificado.toLocaleTimeString('pt-BR')}` : '');
 }
 
-function render() { status(); chips(); desenharMapa(); detalhe(); }
+function render() { status(); chips(); barraMunicipios(); desenharMapa(); detalhe(); }
+
+document.getElementById('map').addEventListener('click', ev => {
+  const { uf, mun } = ev.target.dataset || {};
+  if (mun) { vista = { tipo: 'mun', uf: munUf, cd: mun }; render(); return; }
+  if (!uf) return;
+  vista = modo === 'reg' ? { tipo: 'reg', cod: regiaoDe(uf) } : { tipo: 'uf', uf };
+  render();
+});
+document.getElementById('detail').addEventListener('click', ev => {
+  const uf = ev.target.closest('[data-abrir-mun]')?.dataset.abrirMun;
+  if (uf) abrirMunicipios(uf);
+});
+document.getElementById('selUf').addEventListener('change', ev => abrirMunicipios(ev.target.value));
+document.getElementById('selMun').addEventListener('change', ev => {
+  vista = ev.target.value ? { tipo: 'mun', uf: munUf, cd: ev.target.value } : { tipo: 'uf', uf: munUf };
+  render();
+});
 
 document.getElementById('modes').addEventListener('click', ev => {
   const m = ev.target.dataset.m; if (!m) return;
+  if (m === 'mun') { abrirMunicipios(vista.uf || (vista.tipo === 'mun' && vista.uf) || 'sp'); return; }
+  if (modo === 'mun') vista = { tipo: 'uf', uf: munUf };
   modo = m;
   document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
   if (modo === 'reg' && vista.tipo === 'uf') vista = { tipo: 'reg', cod: regiaoDe(vista.uf) };
@@ -322,6 +451,7 @@ document.getElementById('views').addEventListener('click', ev => {
   catch { document.getElementById('map').innerHTML = '<p class="warn">Malha do IBGE indisponível.</p>'; }
   await atualizar();
   setInterval(() => { if (!document.hidden) atualizar(); }, REFRESH_MS);
+  setInterval(() => { if (!document.hidden) atualizarMunicipios(); }, MUN_REFRESH_MS);
 })();
 </script>
 </body>
