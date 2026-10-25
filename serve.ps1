@@ -98,9 +98,6 @@ while ($listener.IsListening) {
         [IO.File]::WriteAllBytes($file, $bytes)
       }
       $r = @{ code = 200; body = [IO.File]::ReadAllBytes($file) }
-    } elseif ($path -match '^/fotos/\d+\.jpeg$' -and (Test-Path (Join-Path $root ('public' + $path.Replace('/', '\'))))) {
-      $type = 'image/jpeg'
-      $r = @{ code = 200; body = [IO.File]::ReadAllBytes((Join-Path $root ('public' + $path.Replace('/', '\')))) }
     } else {
       $type = 'text/html; charset=utf-8'
       $r = @{ code = 200; body = [IO.File]::ReadAllBytes((Join-Path $root 'public\index.html')) }
