@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Apuração Presidente 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
   :root { --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --mute:#5f6b7a; --line:#dde2e8;
           --lula:#d62828; --flavio:#1d4ed8; --empty:#c9ced6; }
@@ -60,6 +63,33 @@
   .eleito { margin-top:10px; padding:14px 16px; border-radius:10px; background:var(--c); color:#fff; font-size:14px; }
   .eleito-tit { font-size:20px; font-weight:800; margin-bottom:2px; }
   .indef { margin-top:8px; font-size:13px; color:var(--mute); }
+  /* Comemoração em pixel art (ilustrativa) */
+  .festa { position:fixed; inset:0; z-index:100; display:grid; place-items:center; padding:16px; overflow:hidden;
+           background:rgba(10,12,16,.78); }
+  .festa[hidden] { display:none; }
+  .festa-card { position:relative; z-index:2; width:min(360px,100%); background:var(--c); color:#fff; text-align:center;
+                padding:26px 18px 18px; border:4px solid #fff; box-shadow:8px 8px 0 rgba(0,0,0,.45); }
+  .festa-palco { position:relative; display:inline-block; }
+  .festa canvas { display:block; width:144px; height:180px; image-rendering:pixelated; border:4px solid #fff; background:#fff;
+                  animation:pulo .5s steps(2) infinite alternate; }
+  .festa-brilho { position:absolute; font:16px "Press Start 2P", monospace; color:#facc15; animation:pisca .6s steps(2) infinite; }
+  .festa-tit { font:16px/1.6 "Press Start 2P", monospace; margin:16px 0 6px; text-shadow:3px 3px 0 rgba(0,0,0,.35); }
+  .festa-nome { font:11px/1.6 "Press Start 2P", monospace; }
+  .festa-info { font-size:14px; margin-top:12px; }
+  .festa-nota { font-size:11px; opacity:.85; margin-top:10px; }
+  .festa-prev { position:absolute; top:-14px; left:50%; transform:translateX(-50%); background:#facc15; color:#111;
+                font:10px/1 "Press Start 2P", monospace; padding:7px 10px; border:3px solid #111; white-space:nowrap; }
+  .festa-fechar { margin-top:14px; font:10px "Press Start 2P", monospace; background:#fff; color:#111; border:3px solid #111;
+                  padding:10px 14px; min-height:44px; cursor:pointer; box-shadow:4px 4px 0 rgba(0,0,0,.35); }
+  .festa-fechar:active { transform:translate(2px,2px); box-shadow:2px 2px 0 rgba(0,0,0,.35); }
+  .confete { position:absolute; z-index:1; top:-16px; width:10px; height:10px; animation:cai linear infinite; }
+  @keyframes pulo { from { transform:translateY(0); } to { transform:translateY(-16px); } }
+  @keyframes pisca { 50% { opacity:0; } }
+  @keyframes cai { to { transform:translateY(calc(100vh + 32px)) rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .festa canvas, .festa-brilho { animation:none; }
+    .confete { display:none; }
+  }
   .live { color:#0f5a2a; font-weight:600; }
   .live::before { content:"● "; color:#16a34a; }
   .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--mute); margin-top:8px; }
@@ -84,6 +114,7 @@
   <h1>Apuração — Presidente, 2º turno 2026</h1>
   <div class="status" id="status">Carregando dados do TSE…</div>
   <div id="anuncio" aria-live="polite"></div>
+  <div id="festa" class="festa" hidden role="dialog" aria-modal="true" aria-label="Presidente eleito"></div>
   <div class="busca">
     <input id="busca" type="search" placeholder="Pesquisar município…" autocomplete="off" aria-label="Pesquisar município"
            role="combobox" aria-expanded="false" aria-controls="buscaRes">
@@ -156,7 +187,8 @@ function resumo(j) {
   const carg = (j.carg || []).find(c => c.cd === '1') || (j.carg || [])[0];
   const cands = [];
   for (const a of carg?.agr || []) for (const p of a.par || []) for (const c of p.cand || [])
-    cands.push({ n: c.n, nome: c.nmu || c.nm, vap: int(c.vap), eleito: c.e === 's' || /^eleit/i.test(c.st || '') });
+    // Só a situação "Eleito(a)" conta: o campo "e" vale "s" também para quem vai ao 2º turno (st = "2º turno")
+    cands.push({ n: c.n, nome: c.nmu || c.nm, vap: int(c.vap), eleito: /^eleit/i.test((c.st || '').trim()) });
   const s = j.s || {}, e = j.e || {}, v = j.v || {};
   return {
     cands, vv: int(v.vv), vb: int(v.vb), vn: int(v.tvn ?? v.vn), tv: int(v.tv),
@@ -454,10 +486,58 @@ function definicao(r) {
   return { definido: false, c: ord[0], dif, resta };
 }
 
+// ---- Comemoração em pixel art: foto oficial do TSE (public/fotos/<número>.jpeg) reduzida a 24×30 pixels ----
+// Aparece uma vez por visitante quando o eleito é definido. Prévia: ?comemorar=13 ou ?comemorar=22
+function comemorar(c, previa = false) {
+  const el = document.getElementById('festa'), cor = corCand(c.n), br = dados.br;
+  const pv = br ? pct(br.cands.find(x => x.n === c.n)?.vap, br.vv) : null;
+  el.style.setProperty('--c', cor);
+  el.innerHTML = `<div class="festa-card">
+      ${previa ? '<div class="festa-prev">PRÉVIA · SIMULAÇÃO</div>' : ''}
+      <div class="festa-palco">
+        <span class="festa-brilho" style="left:-26px;top:10px">✦</span>
+        <span class="festa-brilho" style="right:-26px;top:46px;animation-delay:.3s">✦</span>
+        <canvas width="24" height="30" aria-hidden="true"></canvas>
+      </div>
+      <div class="festa-tit">ELEITO!</div>
+      <div class="festa-nome">${c.nome}</div>
+      <div class="festa-info">${previa ? 'Assim aparecerá quando o resultado estiver matematicamente definido.'
+        : `Presidente do Brasil${pv != null ? ` · ${fp(pv)} dos votos válidos` : ''}`}</div>
+      <div class="festa-nota">Animação ilustrativa em pixel art · foto oficial: TSE</div>
+      <button class="festa-fechar" type="button">FECHAR</button>
+    </div>`;
+  const cores = [cor, '#ffffff', '#facc15', '#16a34a'];
+  for (let i = 0; i < 48; i++) {
+    const s = document.createElement('i');
+    s.className = 'confete';
+    s.style.cssText = `left:${Math.random() * 100}%;background:${cores[i % cores.length]};` +
+      `animation-duration:${2.5 + Math.random() * 3}s;animation-delay:${-Math.random() * 5}s;` +
+      `animation-timing-function:steps(${14 + (i % 10)})`;
+    el.appendChild(s);
+  }
+  const cv = el.querySelector('canvas'), img = new Image();
+  img.onload = () => cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+  img.onerror = () => cv.remove();
+  img.src = `fotos/${c.n}.jpeg`;
+  const fechar = () => { el.hidden = true; el.innerHTML = ''; document.removeEventListener('keydown', esc); };
+  const esc = ev => { if (ev.key === 'Escape') fechar(); };
+  el.querySelector('.festa-fechar').addEventListener('click', fechar);
+  el.addEventListener('click', ev => { if (ev.target === el) fechar(); }, { once: true });
+  document.addEventListener('keydown', esc);
+  el.hidden = false;
+  el.querySelector('.festa-fechar').focus();
+}
+function comemorarUmaVez(c) {
+  const chave = `festa-${ELEICAO}-${c.n}`;
+  try { if (localStorage.getItem(chave)) return; localStorage.setItem(chave, '1'); } catch {}
+  comemorar(c);
+}
+
 function anuncio() {
   const el = document.getElementById('anuncio'), d = definicao(dados.br);
   if (!d) { el.innerHTML = ''; return; }
   if (d.definido) {
+    comemorarUmaVez(d.c);
     el.innerHTML = `<div class="eleito" style="--c:${corCand(d.c.n)}">
       <div class="eleito-tit">${d.c.nome} está eleito presidente do Brasil</div>
       <div>${d.fonte}${dados.br.final ? '' : ' A totalização ainda continua; os números finais podem mudar, o vencedor não.'}</div></div>`;
@@ -558,6 +638,11 @@ busca.addEventListener('blur', () => setTimeout(() => { buscaRes.hidden = true; 
   try { geo = await (await fetch('malha-uf-ibge.json')).json(); }
   catch { document.getElementById('map').innerHTML = '<p class="warn">Malha do IBGE indisponível.</p>'; }
   await atualizar();
+  const previa = new URLSearchParams(location.search).get('comemorar');
+  if (previa && COR[previa]) {
+    const c = dados.br?.cands.find(x => x.n === previa) || { n: previa, nome: previa === '13' ? 'LULA' : 'FLAVIO BOLSONARO' };
+    comemorar(c, true);
+  }
   setInterval(() => { if (!document.hidden) atualizar(); }, REFRESH_MS);
   setInterval(() => { if (!document.hidden) atualizarMunicipios(); }, MUN_REFRESH_MS);
 })();
