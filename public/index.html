@@ -33,6 +33,7 @@
   .rot.reg text { font-size:19px; }
   #map svg.mun path { stroke-width:.35; }
   .munbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .munbar[hidden] { display:none; }
   .munbar select { font:inherit; font-size:14px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:#fff; min-height:40px; flex:1 1 160px; min-width:0; }
   .btn { display:inline-flex; align-items:center; gap:6px; margin-top:12px; border:1px solid var(--ink); background:var(--ink); color:#fff; border-radius:8px; padding:8px 14px; font:inherit; font-size:14px; font-weight:600; cursor:pointer; min-height:40px; }
   button:focus-visible, select:focus-visible { outline:3px solid #2563eb; outline-offset:2px; }
@@ -56,6 +57,9 @@
           background:color-mix(in srgb, var(--c) 10%, white); border:1px solid color-mix(in srgb, var(--c) 35%, white);
           border-left:4px solid var(--c); color:#1b1f24; }
   .selo strong { font-variant-numeric:tabular-nums; }
+  .eleito { margin-top:10px; padding:14px 16px; border-radius:10px; background:var(--c); color:#fff; font-size:14px; }
+  .eleito-tit { font-size:20px; font-weight:800; margin-bottom:2px; }
+  .indef { margin-top:8px; font-size:13px; color:var(--mute); }
   .live { color:#0f5a2a; font-weight:600; }
   .live::before { content:"● "; color:#16a34a; }
   .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--mute); margin-top:8px; }
@@ -79,6 +83,7 @@
 <header>
   <h1>Apuração — Presidente, 2º turno 2026</h1>
   <div class="status" id="status">Carregando dados do TSE…</div>
+  <div id="anuncio" aria-live="polite"></div>
   <div class="busca">
     <input id="busca" type="search" placeholder="Pesquisar município…" autocomplete="off" aria-label="Pesquisar município"
            role="combobox" aria-expanded="false" aria-controls="buscaRes">
@@ -151,11 +156,12 @@ function resumo(j) {
   const carg = (j.carg || []).find(c => c.cd === '1') || (j.carg || [])[0];
   const cands = [];
   for (const a of carg?.agr || []) for (const p of a.par || []) for (const c of p.cand || [])
-    cands.push({ n: c.n, nome: c.nmu || c.nm, vap: int(c.vap), eleito: c.e === 's' });
+    cands.push({ n: c.n, nome: c.nmu || c.nm, vap: int(c.vap), eleito: c.e === 's' || /^eleit/i.test(c.st || '') });
   const s = j.s || {}, e = j.e || {}, v = j.v || {};
   return {
     cands, vv: int(v.vv), vb: int(v.vb), vn: int(v.tvn ?? v.vn), tv: int(v.tv),
     te: int(e.te), est: int(e.est), c: int(e.c), a: int(e.a), st: int(s.st), ts: int(s.ts),
+    esnt: int(e.esnt), vansj: int(v.vansj) ?? 0, md: j.md || 'n',
     data: j.dg && `${j.dg} ${j.hg || ''}`.trim(), tot: j.dt && `${j.dt} ${j.ht || ''}`.trim(),
     final: j.tf === 's'
   };
@@ -429,6 +435,38 @@ function detalhe() {
     <p class="note">${nota} Brancos e nulos em % do total de votos; comparecimento e abstenção em % do eleitorado das seções já totalizadas.</p>`;
 }
 
+// ---- Definição matemática do resultado nacional ----
+// Eleito só é anunciado quando: (1) o TSE marca o candidato como eleito (campo "e"/"st") ou o arquivo como
+// matematicamente definido ("md" ≠ "n"); ou (2) a diferença entre 1º e 2º supera TODOS os votos que ainda
+// podem entrar: eleitorado das seções não totalizadas ("esnt") + votos anulados sub judice ("vansj").
+function definicao(r) {
+  if (!r || r.cands.length < 2) return null;
+  const ord = [...r.cands].sort((a, b) => (b.vap ?? -1) - (a.vap ?? -1));
+  const eleito = r.cands.find(c => c.eleito);
+  if (eleito) return { definido: true, c: eleito, fonte: 'O TSE marcou o candidato como eleito.' };
+  if (ord[0].vap == null || ord[1].vap == null) return null;
+  const dif = ord[0].vap - ord[1].vap;
+  if ((r.md === 's' || r.md === 'e') && dif > 0) return { definido: true, c: ord[0], dif, fonte: 'O TSE indica resultado matematicamente definido.' };
+  if (r.esnt == null) return { definido: false, dif };
+  const resta = r.esnt + (r.vansj || 0);
+  if (dif > resta) return { definido: true, c: ord[0], dif, resta,
+    fonte: `A diferença de ${fmt(dif)} votos é maior que todos os ${fmt(resta)} votos que ainda podem ser apurados.` };
+  return { definido: false, c: ord[0], dif, resta };
+}
+
+function anuncio() {
+  const el = document.getElementById('anuncio'), d = definicao(dados.br);
+  if (!d) { el.innerHTML = ''; return; }
+  if (d.definido) {
+    el.innerHTML = `<div class="eleito" style="--c:${corCand(d.c.n)}">
+      <div class="eleito-tit">${d.c.nome} está eleito presidente do Brasil</div>
+      <div>${d.fonte}${dados.br.final ? '' : ' A totalização ainda continua; os números finais podem mudar, o vencedor não.'}</div></div>`;
+  } else {
+    el.innerHTML = `<div class="indef">Ainda não matematicamente definido: ${d.c ? `${d.c.nome} lidera por ${fmt(d.dif)} votos, ` : ''}` +
+      (d.resta != null ? `mas ainda faltam até ${fmt(d.resta)} votos para apurar.` : 'aguardando dados de seções restantes.') + '</div>';
+  }
+}
+
 function status() {
   const br = dados.br, el = document.getElementById('status');
   if (!br) { el.innerHTML = '<span class="badge erro">Sem dados</span>Arquivo nacional do TSE indisponível.'; return; }
@@ -439,7 +477,7 @@ function status() {
       : verificado ? ` · <span class="live">Ao vivo</span> verificado às ${verificado.toLocaleTimeString('pt-BR')}` : '');
 }
 
-function render() { status(); chips(); barraMunicipios(); desenharMapa(); detalhe(); }
+function render() { status(); anuncio(); chips(); barraMunicipios(); desenharMapa(); detalhe(); }
 
 document.getElementById('map').addEventListener('click', ev => {
   const { uf, mun } = ev.target.dataset || {};
