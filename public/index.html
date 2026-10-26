@@ -491,7 +491,7 @@ function definicao(r) {
 }
 
 // ---- Comemoração: boneco em pixel art (sprite de jogo antigo) pulando, fundo na cor do candidato ----
-// Aparece uma vez por visitante quando o eleito é definido. Prévia: ?comemorar=13 ou ?comemorar=22
+// Aparece a cada carregamento da página depois que o eleito é definido. Prévia: ?comemorar=13 ou ?comemorar=22
 // Sprite 16×21 desenhado à mão; letras = cores da paleta, "." = transparente. Contorno preto é gerado no código.
 const SPRITE_CABECA = {
   '13': ['..hhhhhh..', '.hhhhhhhh.', 'hhsssssshh', 'hsessssesh', 'bssssssssb', 'bbsmmmmsbb', '.bbbbbbbb.', '..bbbbbb..'],
@@ -585,9 +585,11 @@ function comemorar(c, previa = false) {
   el.hidden = false;
   el.querySelector('.festa-fechar').focus();
 }
+// Uma vez por carregamento: recarregar a página mostra de novo; fechar não reabre a cada atualização de 1 s
+let festaMostrada = false;
 function comemorarUmaVez(c) {
-  const chave = `festa-${ELEICAO}-${c.n}`;
-  try { if (localStorage.getItem(chave)) return; localStorage.setItem(chave, '1'); } catch {}
+  if (festaMostrada) return;
+  festaMostrada = true;
   comemorar(c);
 }
 
